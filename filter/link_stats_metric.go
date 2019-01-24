@@ -11,6 +11,7 @@ import (
 )
 
 type LinkStatsMetricFilter struct {
+	nexter            Nexter
 	config            map[interface{}]interface{}
 	timestamp         string
 	batchWindow       int64
@@ -28,6 +29,10 @@ type LinkStatsMetricFilter struct {
 	metricToEmit map[int64]interface{}
 
 	mutex sync.Locker
+}
+
+func (f *LinkStatsMetricFilter) SetNexter(nexter Nexter) {
+	f.nexter = nexter
 }
 
 func NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetricFilter {
@@ -97,6 +102,7 @@ func NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetr
 	go func() {
 		for range ticker.C {
 			plugin.swap_Metric_MetricToEmit()
+			plugin.emitMetrics()
 		}
 	}()
 	return plugin
@@ -188,7 +194,7 @@ func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 		set[f.lastField] = stats
 	}
 
-	f.EmitMetrics()
+	f.emitMetrics()
 }
 
 func (f *LinkStatsMetricFilter) Filter(event map[string]interface{}) (map[string]interface{}, bool) {
@@ -231,7 +237,7 @@ func (f *LinkStatsMetricFilter) metricToEvents(metrics map[interface{}]interface
 	return events
 }
 
-func (f *LinkStatsMetricFilter) EmitMetrics() {
+func (f *LinkStatsMetricFilter) emitMetrics() {
 	if len(f.metricToEmit) == 0 {
 		return
 	}
@@ -239,22 +245,13 @@ func (f *LinkStatsMetricFilter) EmitMetrics() {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
-	//var event map[string]interface{}
-	//for timestamp, metrics := range f.metricToEmit {
-	//for _, event = range f.metricToEvents(metrics.(map[interface{}]interface{}), 0) {
-	//event[f.timestamp] = time.Unix(timestamp, 0)
+	var event map[string]interface{}
+	for timestamp, metrics := range f.metricToEmit {
+		for _, event = range f.metricToEvents(metrics.(map[interface{}]interface{}), 0) {
+			event[f.timestamp] = time.Unix(timestamp, 0)
 
-	//if f.BaseFilter.nextFilter != nil {
-	//f.BaseFilter.nextFilter.Process(event)
-	//} else {
-	//for _, outputPlugin := range f.BaseFilter.outputs {
-	//if outputPlugin.Pass(event) {
-	//outputPlugin.Emit(event)
-	//}
-	//}
-	//}
-
-	//}
-	//}
-	//f.metricToEmit = make(map[int64]interface{})
+			f.nexter.Process(event)
+		}
+	}
+	f.metricToEmit = make(map[int64]interface{})
 }
