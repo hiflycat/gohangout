@@ -14,6 +14,36 @@ func TestParseCondition(t *testing.T) {
 		pass      bool
 	)
 
+	config := make(map[interface{}]interface{})
+	conditions := make([]interface{}, 3)
+	conditions[0] = "{{if .name}}y{{end}}"
+	conditions[1] = "{{if .name.first}}y{{end}}"
+	conditions[2] = `{{if eq .name.first "dehua"}}y{{end}}`
+	config["if"] = conditions
+	f := NewConditionFilter(config)
+
+	// should drop
+	event = make(map[string]interface{})
+	event["@timestamp"] = time.Now().Unix()
+	event["name"] = map[string]interface{}{"first": "dehua"}
+
+	pass = f.Pass(event)
+
+	if pass == false {
+		t.Error("should pass the conditions")
+	}
+
+	// should not drop
+	event = make(map[string]interface{})
+	event["@timestamp"] = time.Now().Unix()
+	event["name"] = map[string]interface{}{"last": "liu"}
+
+	pass = f.Pass(event)
+
+	if pass == true {
+		t.Error("should not pass the conditions")
+	}
+
 	// Single Condition
 	condition = `EQ(name,first,"jia")`
 	root, err = parseBoolTree(condition)
@@ -71,6 +101,21 @@ func TestParseCondition(t *testing.T) {
 
 	event = make(map[string]interface{})
 	event["name"] = map[string]interface{}{"first": "jia", "last": "liu"}
+	pass = root.Pass(event)
+	if !pass {
+		t.Errorf("`%s` %#v", condition, event)
+	}
+
+	// combinin conditions
+
+	condition = `!Exist(source) && (EQ(path,"/var/log/secure") || EQ(path,"/var/log/messages"))`
+	root, err = parseBoolTree(condition)
+	if err != nil {
+		t.Errorf("parse %s error: %s", condition, err)
+	}
+
+	event = make(map[string]interface{})
+	event["path"] = "/var/log/messages"
 	pass = root.Pass(event)
 	if !pass {
 		t.Errorf("`%s` %#v", condition, event)
