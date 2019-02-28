@@ -168,7 +168,7 @@ func (hd *HermesDecoder) Decode(value []byte) map[string]interface{} {
 	d.UseNumber()
 	err := d.Decode(&rst)
 	if err != nil || d.More() {
-		rst["@timestamp"] = time.Now().UnixNano() / 1000000
+		rst["@timestamp"] = time.Now()
 		rst["message"] = string(value)
 		return rst
 	}
