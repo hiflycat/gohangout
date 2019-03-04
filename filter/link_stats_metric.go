@@ -2,7 +2,6 @@ package filter
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,7 @@ type LinkStatsMetricFilter struct {
 	dropOriginalEvent bool
 	windowOffset      int64
 	accumulateMode    int
+	reduce            bool
 
 	fields            []string
 	fieldsWithoutLast []string
@@ -36,7 +36,7 @@ func (f *LinkStatsMetricFilter) SetNexter(nexter Nexter) {
 }
 
 func NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetricFilter {
-	plugin := &LinkStatsMetricFilter{
+	p := &LinkStatsMetricFilter{
 		config:       config,
 		metric:       make(map[int64]interface{}),
 		metricToEmit: make(map[int64]interface{}),
@@ -45,67 +45,103 @@ func NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetr
 	}
 
 	if fieldsLink, ok := config["fieldsLink"]; ok {
-		plugin.fields = strings.Split(fieldsLink.(string), "->")
-		plugin.fieldsLength = len(plugin.fields)
-		plugin.fieldsWithoutLast = plugin.fields[:plugin.fieldsLength-1]
-		plugin.lastField = plugin.fields[plugin.fieldsLength-1]
+		p.fields = strings.Split(fieldsLink.(string), "->")
+		p.fieldsLength = len(p.fields)
+		p.fieldsWithoutLast = p.fields[:p.fieldsLength-1]
+		p.lastField = p.fields[p.fieldsLength-1]
 	} else {
 		glog.Fatal("fieldsLink must be set in linkstatmetric filter plugin")
 	}
 
 	if timestamp, ok := config["timestamp"]; ok {
-		plugin.timestamp = timestamp.(string)
+		p.timestamp = timestamp.(string)
 	} else {
-		plugin.timestamp = "@timestamp"
+		p.timestamp = "@timestamp"
 	}
 
 	if dropOriginalEvent, ok := config["drop_original_event"]; ok {
-		plugin.dropOriginalEvent = dropOriginalEvent.(bool)
+		p.dropOriginalEvent = dropOriginalEvent.(bool)
 	} else {
-		plugin.dropOriginalEvent = false
+		p.dropOriginalEvent = false
 	}
 
 	if batchWindow, ok := config["batchWindow"]; ok {
-		plugin.batchWindow = int64(batchWindow.(int))
+		p.batchWindow = int64(batchWindow.(int))
 	} else {
 		glog.Fatal("batchWindow must be set in linkstatmetric filter plugin")
 	}
 
 	if reserveWindow, ok := config["reserveWindow"]; ok {
-		plugin.reserveWindow = int64(reserveWindow.(int))
+		p.reserveWindow = int64(reserveWindow.(int))
 	} else {
 		glog.Fatal("reserveWindow must be set in linkstatmetric filter plugin")
+	}
+
+	if reduce, ok := config["reduce"]; ok {
+		p.reduce = reduce.(bool)
 	}
 
 	if accumulateModeI, ok := config["accumulateMode"]; ok {
 		accumulateMode := accumulateModeI.(string)
 		switch accumulateMode {
 		case "cumulative":
-			plugin.accumulateMode = 0
+			p.accumulateMode = 0
 		case "separate":
-			plugin.accumulateMode = 1
+			p.accumulateMode = 1
 		default:
 			glog.Errorf("invalid accumulateMode: %s. set to cumulative", accumulateMode)
-			plugin.accumulateMode = 0
+			p.accumulateMode = 0
 		}
 	} else {
-		plugin.accumulateMode = 0
+		p.accumulateMode = 0
 	}
 
 	if windowOffset, ok := config["windowOffset"]; ok {
-		plugin.windowOffset = (int64)(windowOffset.(int))
+		p.windowOffset = (int64)(windowOffset.(int))
 	} else {
-		plugin.windowOffset = 0
+		p.windowOffset = 0
 	}
 
-	ticker := time.NewTicker(time.Second * time.Duration(plugin.batchWindow))
+	ticker := time.NewTicker(time.Second * time.Duration(p.batchWindow))
 	go func() {
 		for range ticker.C {
-			plugin.swap_Metric_MetricToEmit()
-			plugin.emitMetrics()
+			p.swap_Metric_MetricToEmit()
+			p.emitMetrics()
 		}
 	}()
-	return plugin
+	return p
+}
+
+func (f *LinkStatsMetricFilter) metricToEvents(metrics map[interface{}]interface{}, level int) []map[string]interface{} {
+	var (
+		fieldName string                   = f.fields[level]
+		events    []map[string]interface{} = make([]map[string]interface{}, 0)
+	)
+
+	if level == f.fieldsLength-1 {
+		for _, statsI := range metrics {
+			stats := statsI.(map[string]interface{})
+			event := make(map[string]interface{})
+			event["count"] = stats["count"]
+			event["sum"] = stats["sum"]
+			event["mean"] = stats["sum"].(float64) / float64(stats["count"].(int))
+			events = append(events, event)
+		}
+		return events
+	}
+
+	for fieldValue, nextLevelMetrics := range metrics {
+		for _, e := range f.metricToEvents(nextLevelMetrics.(map[interface{}]interface{}), level+1) {
+			event := make(map[string]interface{})
+			event[fmt.Sprintf("%s", fieldName)] = fieldValue
+			for k, v := range e {
+				event[k] = v
+			}
+			events = append(events, event)
+		}
+	}
+
+	return events
 }
 
 func (f *LinkStatsMetricFilter) swap_Metric_MetricToEmit() {
@@ -138,21 +174,42 @@ func (f *LinkStatsMetricFilter) swap_Metric_MetricToEmit() {
 }
 func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 	var value float64
-	fieldValueI := event[f.lastField]
-	if fieldValueI == nil {
-		return
+	var (
+		count int
+		sum   float64
+	)
+
+	if f.reduce {
+		if c, ok := event["count"]; !ok {
+			return
+		} else {
+			count = c.(int)
+		}
+		if s, ok := event["sum"]; !ok {
+			return
+		} else {
+			sum = s.(float64)
+		}
+	} else {
+		fieldValueI := event[f.lastField]
+		if fieldValueI == nil {
+			return
+		}
+		value = fieldValueI.(float64)
+
+		count, sum = 1, value
 	}
-	value = fieldValueI.(float64)
 
 	var timestamp int64
 	if v, ok := event[f.timestamp]; ok {
-		if reflect.TypeOf(v).String() != "time.Time" {
-			glog.V(10).Infof("timestamp must be time.Time, but it's %s", reflect.TypeOf(v).String())
+		if t, ok := v.(time.Time); !ok {
+			glog.V(20).Infof("timestamp is not time.Time type")
 			return
+		} else {
+			timestamp = t.Unix()
 		}
-		timestamp = v.(time.Time).Unix()
 	} else {
-		glog.V(10).Infof("not timestamp in event. %s", event)
+		glog.V(20).Infof("no timestamp in event. %s", event)
 		return
 	}
 
@@ -184,57 +241,18 @@ func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 	}
 
 	if statsI, ok := set[f.lastField]; ok {
-		stats := statsI.(map[string]float64)
-		stats["count"] = 1 + stats["count"]
-		stats["sum"] = value + stats["sum"]
+		stats := statsI.(map[string]interface{})
+		stats["count"] = count + stats["count"].(int)
+		stats["sum"] = sum + stats["sum"].(float64)
+		set[f.lastField] = stats
 	} else {
-		stats := make(map[string]float64)
-		stats["count"] = 1
-		stats["sum"] = value
+		stats := make(map[string]interface{})
+		stats["count"] = count
+		stats["sum"] = sum
 		set[f.lastField] = stats
 	}
 
 	f.emitMetrics()
-}
-
-func (f *LinkStatsMetricFilter) Filter(event map[string]interface{}) (map[string]interface{}, bool) {
-	f.updateMetric(event)
-	if f.dropOriginalEvent {
-		return nil, false
-	}
-	return event, false
-}
-
-func (f *LinkStatsMetricFilter) metricToEvents(metrics map[interface{}]interface{}, level int) []map[string]interface{} {
-	var (
-		fieldName string                   = f.fields[level]
-		events    []map[string]interface{} = make([]map[string]interface{}, 0)
-	)
-
-	if level == f.fieldsLength-1 {
-		for _, statsI := range metrics {
-			stats := statsI.(map[string]float64)
-			event := make(map[string]interface{})
-			event["count"] = int(stats["count"])
-			event["sum"] = stats["sum"]
-			event["mean"] = stats["sum"] / stats["count"]
-			events = append(events, event)
-		}
-		return events
-	}
-
-	for fieldValue, nextLevelMetrics := range metrics {
-		for _, e := range f.metricToEvents(nextLevelMetrics.(map[interface{}]interface{}), level+1) {
-			event := make(map[string]interface{})
-			event[fmt.Sprintf("%s", fieldName)] = fieldValue
-			for k, v := range e {
-				event[k] = v
-			}
-			events = append(events, event)
-		}
-	}
-
-	return events
 }
 
 func (f *LinkStatsMetricFilter) emitMetrics() {
@@ -249,9 +267,16 @@ func (f *LinkStatsMetricFilter) emitMetrics() {
 	for timestamp, metrics := range f.metricToEmit {
 		for _, event = range f.metricToEvents(metrics.(map[interface{}]interface{}), 0) {
 			event[f.timestamp] = time.Unix(timestamp, 0)
-
 			f.nexter.Process(event)
 		}
 	}
 	f.metricToEmit = make(map[int64]interface{})
+}
+
+func (f *LinkStatsMetricFilter) Filter(event map[string]interface{}) (map[string]interface{}, bool) {
+	f.updateMetric(event)
+	if f.dropOriginalEvent {
+		return nil, false
+	}
+	return event, false
 }
