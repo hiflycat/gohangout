@@ -2,6 +2,7 @@ package filter
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -9,8 +10,15 @@ import (
 	"github.com/golang/glog"
 )
 
+type stats struct {
+	count int
+	min   float64
+	max   float64
+	sum   float64
+}
+
 type LinkStatsMetricFilter struct {
-	nexter            Nexter
+	box               *FilterBox
 	config            map[interface{}]interface{}
 	timestamp         string
 	batchWindow       int64
@@ -31,8 +39,8 @@ type LinkStatsMetricFilter struct {
 	mutex sync.Locker
 }
 
-func (f *LinkStatsMetricFilter) SetNexter(nexter Nexter) {
-	f.nexter = nexter
+func (f *LinkStatsMetricFilter) SetBelongTo(box *FilterBox) {
+	f.box = box
 }
 
 func NewLinkStatsMetricFilter(config map[interface{}]interface{}) *LinkStatsMetricFilter {
@@ -120,11 +128,13 @@ func (f *LinkStatsMetricFilter) metricToEvents(metrics map[interface{}]interface
 
 	if level == f.fieldsLength-1 {
 		for _, statsI := range metrics {
-			stats := statsI.(map[string]interface{})
+			s := statsI.(*stats)
 			event := make(map[string]interface{})
-			event["count"] = stats["count"]
-			event["sum"] = stats["sum"]
-			event["mean"] = stats["sum"].(float64) / float64(stats["count"].(int))
+			event["count"] = s.count
+			event["sum"] = s.sum
+			event["min"] = s.min
+			event["max"] = s.max
+			event["mean"] = s.sum / float64(s.count)
 			events = append(events, event)
 		}
 		return events
@@ -176,6 +186,8 @@ func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 	var value float64
 	var (
 		count int
+		min   float64
+		max   float64
 		sum   float64
 	)
 
@@ -190,6 +202,16 @@ func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 		} else {
 			sum = s.(float64)
 		}
+		if s, ok := event["min"]; !ok {
+			return
+		} else {
+			min = s.(float64)
+		}
+		if s, ok := event["max"]; !ok {
+			return
+		} else {
+			max = s.(float64)
+		}
 	} else {
 		fieldValueI := event[f.lastField]
 		if fieldValueI == nil {
@@ -197,7 +219,7 @@ func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 		}
 		value = fieldValueI.(float64)
 
-		count, sum = 1, value
+		count, min, max, sum = 1, value, value, value
 	}
 
 	var timestamp int64
@@ -241,18 +263,15 @@ func (f *LinkStatsMetricFilter) updateMetric(event map[string]interface{}) {
 	}
 
 	if statsI, ok := set[f.lastField]; ok {
-		stats := statsI.(map[string]interface{})
-		stats["count"] = count + stats["count"].(int)
-		stats["sum"] = sum + stats["sum"].(float64)
-		set[f.lastField] = stats
+		s := statsI.(*stats)
+		s.count = count + s.count
+		s.sum = sum + s.sum
+		s.min = math.Min(s.min, min)
+		s.max = math.Max(s.max, max)
+		set[f.lastField] = s
 	} else {
-		stats := make(map[string]interface{})
-		stats["count"] = count
-		stats["sum"] = sum
-		set[f.lastField] = stats
+		set[f.lastField] = &stats{count, min, max, sum}
 	}
-
-	f.emitMetrics()
 }
 
 func (f *LinkStatsMetricFilter) emitMetrics() {
@@ -267,7 +286,8 @@ func (f *LinkStatsMetricFilter) emitMetrics() {
 	for timestamp, metrics := range f.metricToEmit {
 		for _, event = range f.metricToEvents(metrics.(map[interface{}]interface{}), 0) {
 			event[f.timestamp] = time.Unix(timestamp, 0)
-			f.nexter.Process(event)
+			f.box.PostProcess(event, true)
+			f.box.nexter.Process(event)
 		}
 	}
 	f.metricToEmit = make(map[int64]interface{})

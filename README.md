@@ -79,7 +79,7 @@ outputs:
     - Elasticsearch:
         hosts:
             - http://127.0.0.1:9200
-        index: 'web-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
+        index: 'web-%{appid}-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
         index_type: "logs"
         bulk_actions: 5000
         bulk_size: 20
@@ -92,6 +92,7 @@ outputs:
 
 ```
 fields:
+	logtime: '%{date} {%time}'
     type: 'weblog'
     hostname: '[host]'
     name: '{{.firstname}}.{{.lastname}}'
@@ -108,7 +109,14 @@ fields:
 
 如果含有 `{{XXX}}` 的内容, 就认为是 golang template 格式, 具体语法可以参考 [https://golang.org/pkg/text/template/](https://golang.org/pkg/text/template/). 前后及中间可以含有别的内容, 像 `name: 'my name is {{.firstname}}.{{.lastname}}'`
 
-### 格式3 除了1,2 之外的其它
+### 格式3 %{XXX}
+
+含有 `%{XXX}` 的内容, 使用自己定义的格式处理, 像上面的 `%{date} {%time}` 是把 date 字段和 time 字段组合成一个 logtime 字段. 前后以及中间可以有任何内容. 像 Elasticsearch 中的 index: `web-%{appid}-%{+2006-01-02}` 也是这种格式, %{+XXX} 代表时间字段, 会按时间格式做格式化处理.
+
+2006 01 02 15 06 05 这几个数字是 golang 里面特定的数字, 代表年月日时分秒. 1月2号3点4分5秒06年. 其实就像hangout里面的YYYY MM dd HH mm SS
+
+
+### 格式4 除了1,2,3 之外的其它
 
 在不同Filter中, 可能意义不同. 像 Date 中的 src: logtime, 是说取 logtime 字段的值.  
 Elasticsearch 中的 index_type: logs , 这里的 logs 不是指字段名, 就是字面值.
@@ -130,6 +138,28 @@ Stdin:
 
 - json 对数据做 json 解析, 如果解析失败, 则将整条数据写到 message 字段, 并添加当前时间到 `@timestamp` 字段. 如果解析成功而且数据中没有 `@timestamp` 字段, 则添加当前时间到 `@timestamp` 字段.
 - plain 将整条数据写到 message 字段, 并添加当前时间到 `@timestamp` 字段.
+
+### TCP
+
+```
+TCP:
+	network: tcp4
+	address: 0.0.0.0:10000
+	codec: plain
+```
+
+#### network
+
+默认为 tcp , 可以明确指定使用 tcp4 或者 tcp6
+
+#### address
+
+监听端口, 无默认值, 必须设置
+
+#### codec
+
+默认 plain
+
 
 ### Kafka
 
@@ -163,7 +193,7 @@ assign 配置用来只消费特定的partition, 和 `topic` 配置是冲突的, 
 
 bootstrap.servers group.id 必须配置
 
-auto.commit.interval.ms 是指多久commit一次offset, 太长的话有可能造成数据重复消费,太短的话可能会对kafka千万太大压力.
+auto.commit.interval.ms 是指多久commit一次offset, 太长的话有可能造成数据重复消费,太短的话可能会对kafka造成太大压力.
 
 max.partition.fetch.bytes 是指kafka client一次从kafka server读取多少数据,默认是10MB
 
@@ -191,6 +221,28 @@ Stdout:
 
 if的语法参考下面 [IF语法](#if)
 
+### TCP
+
+```
+TCP:
+	network: tcp4
+	address: 127.0.0.1:10000
+	concurrent: 2
+```
+
+#### network
+
+默认为 tcp , 可以明确指定使用 tcp4 或者 tcp6
+
+#### address
+
+TCP 远端地址, 无默认值, 必须设置
+
+#### concurrent
+
+开几个 tcp 连接一起写, 默认1
+
+
 ### Elasticsearch
 
 ```
@@ -198,7 +250,7 @@ Elasticsearch:
     hosts:
         - http://10.0.0.100:9200
         - http://10.0.0.101:9200
-    index: 'web-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
+    index: 'web-%{appid}-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
     index_type: "logs"
     bulk_actions: 5000
     routing: '[domain]'
@@ -396,7 +448,7 @@ Add:
   fields:
       name: childe
       hostname: '[host]'
-      logtime: '{{.date}} {{.{time}}
+      logtime: '{{.date}} {{.time}}
       message: '[stored][message]'
       '[a][b]': '[stored][message]'
 ```
@@ -517,6 +569,9 @@ Grok:
         - '^(?P<logtime>\S+) (?P<status>\d+) (?P<loglevel>\w+)$'
     ignore_blank: true
     remove_fields: ['message']
+	pattern_paths:
+	- 'https://raw.githubusercontent.com/vjeantet/grok/master/patterns/grok-patterns'
+	- '/opt/gohangout/patterns/linux-syslog'
 ```
 
 源字段不存在, 返回 false. 所有格式不匹配, 返回 false
@@ -529,6 +584,10 @@ Grok:
 
 依次匹配, 直到有一个成功.
 
+#### pattern_paths
+
+会加载定义的 patterns 文件. 这里推荐 (https://github.com/vjeantet/grok)[https://github.com/vjeantet/grok] 项目, 里面把 logstash 中使用的 pattern 都翻译成了 golang 的正则库可以使用的.
+
 #### ignore_blank
 
 默认 true. 如果匹配到的字段为空字符串, 则忽略这个字段. 如果 ignore_blank: false , 则添加此字段, 其值为空字符串.
@@ -537,7 +596,7 @@ Grok:
 
 根据 IP 信息补充地址信息, 会生成如下字段.
 
-country_name province_name city_name 
+country_name province_name city_name
 
 下面四个字段视情况生成, 可能会缺失. latitude longitude location country_code
 
@@ -630,6 +689,7 @@ LinkMetric:
     windowOffset: 0
     accumulateMode: cumulative
     drop_original_event: false
+	reduce: false
 ```
 
 每600s输出一次, 输出结果形式如下:
@@ -671,6 +731,10 @@ LinkMetric:
 #### drop_original_event
 
 是否丢弃原始数据, 默认为 false. 如果设置为true, 则丢弃原始数据, 只输出聚合统计数据.
+
+#### reduce
+
+是否 reduce , 默认 false.  如果为true, 则会解析数据中的 `count`, `sum` 字段. 举例来说, 一个 topic 有10个 partitions, 有10个消费者做聚合, 聚合后的数据通过 tcp output 吐给另外一个进程R, 进程R对聚合数据进行 reduce 操作, 然后再把二次聚合后的数据吐到ES或者Influxdb, 这样最终写到ES或Influxdb的数据就是10个partitions的总的数据.
 
 ### LinkStatsMetric
 
