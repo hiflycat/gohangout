@@ -3,15 +3,11 @@ hash:=$(shell git rev-parse --short HEAD)
 .PHONY: gohangout test ctrip all clean
 
 gohangout:
-	go build -o build/gohangout
-
-test:
 	mkdir -p build/
-	GOOS=linux GOARCH=amd64 go build -o build/gohangout-linux-x64-$(hash)
+	build -o build/gohangout
 
 ctrip:
 	mkdir -p build/
-	git checkout ctrip
 	GOOS=linux GOARCH=amd64 go build -o build/gohangout-linux-x64-$(hash)
 
 all:
