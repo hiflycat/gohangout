@@ -1,8 +1,9 @@
 hash:=$(shell git rev-parse --short HEAD)
 
-.PHONY: gohangout test ctrip all clean
+.PHONY: gohangout test ctrip all clean check
 
 gohangout:
+	make check
 	mkdir -p build/
 	go build -o build/gohangout
 
@@ -11,6 +12,7 @@ ctrip:
 	GOOS=linux GOARCH=amd64 go build -o build/gohangout-linux-x64-$(hash)
 
 all:
+	make check
 	@echo $(hash)
 	mkdir -p build/
 
@@ -23,3 +25,6 @@ all:
 clean:
 	rm -rf build/*
 
+check:
+	git diff-index --quiet HEAD --
+	govendor status
