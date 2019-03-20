@@ -4,7 +4,7 @@ hash:=$(shell git rev-parse --short HEAD)
 
 gohangout:
 	mkdir -p build/
-	build -o build/gohangout
+	go build -o build/gohangout
 
 ctrip:
 	mkdir -p build/
