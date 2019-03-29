@@ -78,7 +78,7 @@ filters:
 outputs:
     - Elasticsearch:
         hosts:
-            - http://127.0.0.1:9200
+            - 'http://admin:password@127.0.0.1:9200'
         index: 'web-%{appid}-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
         index_type: "logs"
         bulk_actions: 5000
@@ -248,8 +248,8 @@ TCP 远端地址, 无默认值, 必须设置
 ```
 Elasticsearch:
     hosts:
-        - http://10.0.0.100:9200
-        - http://10.0.0.101:9200
+        - 'http://10.0.0.100:9200'
+        - 'http://admin:password@10.0.0.101:9200'
     index: 'web-%{appid}-%{+2006-01-02}' #golang里面的渲染方式就是用数字, 而不是用YYMM.
     index_type: "logs"
     bulk_actions: 5000
@@ -787,6 +787,7 @@ Split:
   fields: ['logtime', 'hostname', 'uri', 'return_code']
   ignore_blank: true
   overwrite: true
+  trim: '"]['
 ```
 
 #### src
@@ -814,6 +815,10 @@ sep: "\x01"
 #### ignore_blank
 
 如果分割后的某字段为空, 刚不放后 event 中, 默认 true
+
+#### trim
+
+用来把分割后的字段, 去除两边的一些空格或者是标点等.
 
 ### Translate
 
