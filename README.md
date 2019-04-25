@@ -92,7 +92,7 @@ outputs:
 
 ```
 fields:
-	logtime: '%{date} {%time}'
+    logtime: '%{date} {%time}'
     type: 'weblog'
     hostname: '[host]'
     name: '{{.firstname}}.{{.lastname}}'
@@ -143,9 +143,9 @@ Stdin:
 
 ```
 TCP:
-	network: tcp4
-	address: 0.0.0.0:10000
-	codec: plain
+    network: tcp4
+    address: 0.0.0.0:10000
+    codec: plain
 ```
 
 #### network
@@ -173,13 +173,15 @@ Kafka:
     consumer_settings:
         bootstrap.servers: "10.0.0.100:9092,10.0.0.101:9092"
         group.id: gohangout.weblog
-        max.partition.fetch.bytes: 10485760
-        auto.commit.interval.ms: 5000
-        from.beginning: true
+        max.partition.fetch.bytes: '10485760'
+        auto.commit.interval.ms: '5000'
+        from.beginning: 'true'
         # sasl.mechanism: PLAIN
         # sasl.user: admin
         # sasl.password: admin-secret
 ```
+
+**特别注意** 参数需要是字符串, 像 `auto.commit.interval.ms: '5000'` , 以及 `from.beginning: 'true'` , 等等
 
 #### topic
 
@@ -225,9 +227,9 @@ if的语法参考下面 [IF语法](#if)
 
 ```
 TCP:
-	network: tcp4
-	address: 127.0.0.1:10000
-	concurrent: 2
+    network: tcp4
+    address: 127.0.0.1:10000
+    concurrent: 2
 ```
 
 #### network
@@ -320,8 +322,8 @@ Clickhouse:
     - 'tcp://10.100.0.102:9000'
     fields: ['datetime', 'appid', 'c_ip', 'domain', 'cs_method', 'cs_uri', 's_ip', 'sc_status', 'time_taken']
     bulk_actions: 1000
-	flush_interval: 30
-	concurrent: 1
+    flush_interval: 30
+    concurrent: 1
 ```
 
 #### table
@@ -467,16 +469,16 @@ overwrite: true 的情况下, 这些新字段会覆盖老字段(如果有的话)
 Convert:
     fields:
         time_taken:
-			remove_if_fail: false
-			setto_if_fail: 0
+            remove_if_fail: false
+            setto_if_fail: 0
             to: float
         sc_bytes:
             to: int
-			remove_if_fail: true
+            remove_if_fail: true
         status:
             to: bool
-			remove_if_fail: false
-			setto_if_fail: true
+            remove_if_fail: false
+            setto_if_fail: true
 ```
 
 #### remove_if_fail
@@ -569,9 +571,9 @@ Grok:
         - '^(?P<logtime>\S+) (?P<status>\d+) (?P<loglevel>\w+)$'
     ignore_blank: true
     remove_fields: ['message']
-	pattern_paths:
-	- 'https://raw.githubusercontent.com/vjeantet/grok/master/patterns/grok-patterns'
-	- '/opt/gohangout/patterns/'
+    pattern_paths:
+    - 'https://raw.githubusercontent.com/vjeantet/grok/master/patterns/grok-patterns'
+    - '/opt/gohangout/patterns/'
 ```
 
 源字段不存在, 返回 false. 所有格式不匹配, 返回 false
@@ -691,7 +693,7 @@ LinkMetric:
     windowOffset: 0
     accumulateMode: cumulative
     drop_original_event: false
-	reduce: false
+    reduce: false
 ```
 
 每600s输出一次, 输出结果形式如下:
